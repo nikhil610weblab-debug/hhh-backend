@@ -20,6 +20,19 @@ function generateClaimCode() {
 function hashClaimCode(code) {
   return crypto.createHash("sha256").update(code).digest("hex");
 }
+// Guests get everything about a home except the exact street address — the
+// homepage promises "sign up to unlock addresses", so gate it here instead
+// of trusting every frontend view to remember to hide it.
+function serializeHome(home, canSeeAddress) {
+  const plain = home.toJSON();
+  if (!canSeeAddress) {
+    plain.address = null;
+    plain.addressLocked = true;
+  } else {
+    plain.addressLocked = false;
+  }
+  return plain;
+}
 // POST /api/homes/:id/claim/request
 // Only unclaimed homes (ownerId === null) can be claimed — this is how a
 // homeowner takes ownership of a listing that came from an approved
@@ -110,12 +123,11 @@ async function listHomes(req, res, next) {
     if (city) where.city = { [Op.like]: `%${city}%` };
     if (eventId) where.eventId = eventId;
     if (address) where.address = { [Op.like]: `%${address}%` };
-    // Used by the "claim your home" search — surfaces homes created from
-    // approved nominations that no one has claimed yet.
     if (unclaimed === "true") where.ownerId = null;
 
     const homes = await Home.findAll({ where, order: [["createdAt", "DESC"]], limit: 100 });
-    res.json({ success: true, homes });
+    const canSeeAddress = Boolean(req.user);
+    res.json({ success: true, homes: homes.map((h) => serializeHome(h, canSeeAddress)) });
   } catch (error) {
     next(error);
   }
@@ -125,7 +137,7 @@ async function getHome(req, res, next) {
   try {
     const home = await Home.findByPk(req.params.id);
     if (!home) return res.status(404).json({ success: false, error: "Home not found" });
-    res.json({ success: true, home });
+    res.json({ success: true, home: serializeHome(home, Boolean(req.user)) });
   } catch (error) {
     next(error);
   }

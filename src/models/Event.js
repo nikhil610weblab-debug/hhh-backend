@@ -24,6 +24,9 @@ module.exports = (sequelize, DataTypes) => {
       },
       coverUrl: { type: DataTypes.STRING(500), field: "cover_url" },
       theme: { type: DataTypes.STRING(30), allowNull: false, defaultValue: "christmas" },
+      primaryColor: { type: DataTypes.STRING(7), allowNull: true, field: "primary_color" },
+      secondaryColor: { type: DataTypes.STRING(7), allowNull: true, field: "secondary_color" },
+      accentColor: { type: DataTypes.STRING(7), allowNull: true, field: "accent_color" },
     },
     {
       sequelize,

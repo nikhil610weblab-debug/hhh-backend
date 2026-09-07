@@ -1,5 +1,6 @@
 const { Nomination, Home, Event, User } = require("../models");
 const { sendEmail } = require("../utils/notify");
+const { notifyNearbySubscribers } = require("../utils/nearbyAlerts");
 
 function makeSlug(address, city) {
   return (
@@ -127,6 +128,10 @@ async function reviewNomination(req, res, next) {
       homeId: home.id,
     });
 
+    // Fire-and-forget — never let a notification failure affect the approval response.
+    notifyNearbySubscribers(home).catch((err) =>
+      console.error("[nearbyAlerts] notify failed", err.message)
+    );
     if (nomination.nominator?.email) {
       sendEmail({
         to: nomination.nominator.email,

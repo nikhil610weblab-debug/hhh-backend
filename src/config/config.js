@@ -16,7 +16,7 @@ const base = {
 module.exports = {
   development: {
     ...base,
-    logging: console.log,
+    logging: false,
   },
   test: {
     ...base,

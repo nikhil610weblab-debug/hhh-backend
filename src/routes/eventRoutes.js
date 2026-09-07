@@ -5,6 +5,7 @@ const {
     createEvent,
     updateEvent,
     activateEvent,
+    duplicateEvent,
 } = require("../controllers/eventController");
 const { authenticate, authorize } = require("../middleware/auth");
 
@@ -13,6 +14,7 @@ router.get("/active", getActiveEvent);
 
 router.get("/", listEvents);
 router.post("/", authenticate, authorize("admin"), createEvent);
+router.post("/:id/duplicate", authenticate, authorize("admin"), duplicateEvent);
 router.patch("/:id", authenticate, authorize("admin"), updateEvent);
 router.patch("/:id/activate", authenticate, authorize("admin"), activateEvent);
 

@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("path");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
@@ -18,10 +19,11 @@ const yardSignRoutes = require("./routes/yardSignRoutes");
 const fulfillmentRoutes = require("./routes/fulfillmentRoutes");
 const analyticsRoutes = require("./routes/analyticsRoutes");
 const { notFound, errorHandler } = require("./middleware/error");
+const nearbyAlertRoutes = require("./routes/nearbyAlertRoutes");
 
 const app = express();
 
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(cors({
   origin: process.env.FRONTEND_URL || "http://localhost:3000",
   credentials: true,
@@ -29,6 +31,8 @@ app.use(cors({
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300 }));
+
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
 app.get("/api/health", (req, res) => {
   res.json({ success: true, message: "HomeHolidayHunt backend is running" });
@@ -46,6 +50,7 @@ app.use("/api/fulfillments", fulfillmentRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api", publicRoutes);
 app.use("/api/scans", scanRoutes);
+app.use("/api/alert-subscriptions", nearbyAlertRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

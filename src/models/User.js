@@ -8,6 +8,7 @@ module.exports = (sequelize, DataTypes) => {
       User.hasMany(models.Nomination, { foreignKey: "nominatorId", as: "nominations" });
       User.hasMany(models.Tour, { foreignKey: "userId", as: "tours" });
       User.hasMany(models.Message, { foreignKey: "authorId", as: "messages" });
+      User.hasMany(models.NearbyAlertSubscription, { foreignKey: "userId", as: "nearbyAlertSubscriptions", onDelete: "CASCADE" });
     }
   }
 

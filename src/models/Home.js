@@ -11,6 +11,7 @@ module.exports = (sequelize, DataTypes) => {
       Home.hasOne(models.Nomination, { foreignKey: "homeId", as: "sourceNomination" });
       Home.hasMany(models.Fulfillment, { foreignKey: "homeId", as: "fulfillments" });
       Home.hasMany(models.ScanEvent, { foreignKey: "homeId", as: "scans", onDelete: "CASCADE" });
+      Home.hasMany(models.HomeMedia, { foreignKey: "homeId", as: "media", onDelete: "CASCADE" });
     }
   }
 
