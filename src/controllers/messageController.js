@@ -19,9 +19,58 @@ async function listMessages(req, res, next) {
   }
 }
 
+// Homeowner hearts (or un-hearts) a visitor's message. Ownership is
+// checked against the home's real ownerId now that we have real auth,
+// instead of trusting an email in the request body like the original did.
+async function toggleMessageFavorite(req, res, next) {
+  try {
+    const message = await Message.findByPk(req.params.id, {
+      include: [{ model: Home, as: "home" }],
+    });
+    if (!message) {
+      return res.status(404).json({ success: false, error: "Message not found" });
+    }
+
+    const isOwner = message.home && message.home.ownerId === req.user.id;
+    const isAdmin = req.user.role === "admin";
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ success: false, error: "You don't manage this listing" });
+    }
+
+    await message.update({ favorited: Boolean(req.body?.favorited) });
+    res.json({ success: true, message });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// One rating per visitor counts toward the average, no matter how many
+// times they've rated this home. Identity is authorId when signed in,
+// visitorId (a client-generated id in localStorage) for guests. Older
+// anonymous ratings with neither value each count individually, same as
+// before — there's no way to tell those apart retroactively.
+async function recomputeHomeRating(home) {
+  const rated = await Message.findAll({
+    where: { homeId: home.id, rating: { [require("sequelize").Op.not]: null } },
+    order: [["createdAt", "DESC"]],
+  });
+
+  const latestByVisitor = new Map();
+  for (const m of rated) {
+    const key = m.authorId ? `user:${m.authorId}` : m.visitorId ? `visitor:${m.visitorId}` : `row:${m.id}`;
+    if (!latestByVisitor.has(key)) {
+      latestByVisitor.set(key, m.rating); // first hit per key is the newest, since sorted DESC
+    }
+  }
+
+  const values = [...latestByVisitor.values()];
+  const count = values.length;
+  const avg = count ? values.reduce((sum, r) => sum + r, 0) / count : 0;
+  await home.update({ ratingAvg: avg, ratingCount: count });
+}
 async function createMessage(req, res, next) {
   try {
-    const { homeId, body, authorName, rating } = req.body || {};
+    const { homeId, body, authorName, rating, visitorId } = req.body || {};
 
     if (!homeId || !body) {
       return res.status(400).json({ success: false, error: "homeId and body are required" });
@@ -38,13 +87,14 @@ async function createMessage(req, res, next) {
       authorId: req.user ? req.user.id : null,
       authorName: authorName || (req.user ? req.user.name : "Guest"),
       rating: typeof rating === "number" ? rating : null,
+      // Only need this for guests — logged-in visitors are already
+      // identified by authorId, which can't be reset like localStorage can.
+      visitorId: req.user ? null : (typeof visitorId === "string" ? visitorId : null),
     });
 
+
     if (typeof rating === "number") {
-      const all = await Message.findAll({ where: { homeId, rating: { [require("sequelize").Op.not]: null } } });
-      const count = all.length;
-      const avg = count ? all.reduce((sum, m) => sum + m.rating, 0) / count : 0;
-      await home.update({ ratingAvg: avg, ratingCount: count });
+      await recomputeHomeRating(home);
     }
 
     // Let the homeowner know someone stopped by — supplementary, so
@@ -73,5 +123,4 @@ async function createMessage(req, res, next) {
     next(error);
   }
 }
-
-module.exports = { listMessages, createMessage };
+module.exports = { listMessages, createMessage,  toggleMessageFavorite };

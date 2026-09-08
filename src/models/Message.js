@@ -15,8 +15,11 @@ module.exports = (sequelize, DataTypes) => {
       homeId: { type: DataTypes.UUID, allowNull: false, field: "home_id" },
       authorId: { type: DataTypes.UUID, field: "author_id" },
       authorName: { type: DataTypes.STRING(120), allowNull: false, defaultValue: "Guest", field: "author_name" },
+      visitorId: { type: DataTypes.STRING(64), field: "visitor_id" },
       body: { type: DataTypes.TEXT, allowNull: false },
       rating: { type: DataTypes.INTEGER, validate: { min: 1, max: 5 } },
+      rating: { type: DataTypes.INTEGER, validate: { min: 1, max: 5 } },
+      favorited: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     },
     {
       sequelize,
