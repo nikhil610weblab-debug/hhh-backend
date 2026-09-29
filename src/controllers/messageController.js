@@ -1,3 +1,4 @@
+const { Op } = require("sequelize");
 const { Message, Home, User } = require("../models");
 const { sendEmail, sendSms } = require("../utils/notify")
 
@@ -43,7 +44,31 @@ async function toggleMessageFavorite(req, res, next) {
     next(error);
   }
 }
-
+// GET /api/messages/recent  (public, capped, no auth)
+async function listRecentMessages(req, res, next) {
+  try {
+    const messages = await Message.findAll({
+      where: { body: { [Op.ne]: null } },
+      include: [{ model: Home, as: "home", attributes: ["title", "address", "slug"] }],
+      order: [["createdAt", "DESC"]],
+      limit: 20,
+    });
+    res.json({
+      success: true,
+      messages: messages.map((m) => ({
+        id: m.id,
+        authorName: m.authorName || "A visitor",
+        body: m.body,
+        rating: m.rating,
+        homeTitle: m.Home?.title || m.Home?.address || "a home",
+        homeSlug: m.Home?.slug || null,
+        createdAt: m.createdAt,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
 // One rating per visitor counts toward the average, no matter how many
 // times they've rated this home. Identity is authorId when signed in,
 // visitorId (a client-generated id in localStorage) for guests. Older
@@ -123,4 +148,4 @@ async function createMessage(req, res, next) {
     next(error);
   }
 }
-module.exports = { listMessages, createMessage,  toggleMessageFavorite };
+module.exports = { listMessages, createMessage, toggleMessageFavorite, listRecentMessages };

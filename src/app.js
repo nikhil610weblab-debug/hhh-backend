@@ -51,6 +51,7 @@ app.use("/api/analytics", analyticsRoutes);
 app.use("/api", publicRoutes);
 app.use("/api/scans", scanRoutes);
 app.use("/api/alert-subscriptions", nearbyAlertRoutes);
+app.use("/api/games", require("./routes/gameRoutes"));
 
 app.use(notFound);
 app.use(errorHandler);

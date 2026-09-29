@@ -6,7 +6,7 @@ const {
   getMyHomes,
   createHome,
   updateHome,
-  requestHomeClaim,
+  generateHomeClaimCode,
   verifyHomeClaim,
 } = require("../controllers/homeController");
 const {
@@ -38,11 +38,12 @@ router.post(
 router.delete("/:id/media/:mediaId", authenticate, authorize("homeowner", "admin"), deleteHomeMedia);
 router.patch("/:id/media/reorder", authenticate, authorize("homeowner", "admin"), reorderHomeMedia);
 
-router.get("/", listHomes);
-router.get("/:id", getHome);
 router.post("/", authenticate, authorize("homeowner", "admin"), createHome);
-router.post("/:id/claim/request", authenticate, authorize("homeowner", "admin"), requestHomeClaim);
+
+// Claim: admin generates the code, homeowner verifies with it.
+router.post("/:id/claim/generate", authenticate, authorize("admin"), generateHomeClaimCode);
 router.post("/:id/claim/verify", authenticate, authorize("homeowner", "admin"), verifyHomeClaim);
+
 // Ownership is checked inside the controller (owner or admin).
 router.patch("/:id", authenticate, authorize("homeowner", "admin"), updateHome);
 

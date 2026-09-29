@@ -1,7 +1,6 @@
 const { Op } = require("sequelize");
 const { Home } = require("../models");
 const crypto = require("crypto");
-const { sendEmail, sendSms } = require("../utils/notify");
 
 function makeSlug(address, city) {
   return `${address}-${city}`
@@ -10,21 +9,32 @@ function makeSlug(address, city) {
     .replace(/(^-|-$)/g, "") + `-${Date.now()}`;
 }
 
-const CLAIM_CODE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const CLAIM_CODE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const MAX_CLAIM_ATTEMPTS = 5;
 
 function generateClaimCode() {
-  // 6 digits, zero-padded — e.g. "042917"
-  return crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+  let out = "";
+  for (let i = 0; i < 8; i++) out += chars[crypto.randomInt(0, chars.length)];
+  return out;
 }
 
 function hashClaimCode(code) {
   return crypto.createHash("sha256").update(code).digest("hex");
 }
-// Guests get everything about a home except the exact street address — the
-// homepage promises "sign up to unlock addresses", so gate it here instead
-// of trusting every frontend view to remember to hide it.
+
+// Never send claim-related secrets to the browser.
+function stripClaimFields(plain) {
+  delete plain.claimCodeHash;
+  delete plain.claimCodeExpiresAt;
+  delete plain.claimRequestedBy;
+  delete plain.claimAttempts;
+  return plain;
+}
+
+// Guests get everything about a home except the exact street address.
 function serializeHome(home, canSeeAddress) {
-  const plain = home.toJSON();
+  const plain = stripClaimFields(home.toJSON());
   if (!canSeeAddress) {
     plain.address = null;
     plain.addressLocked = true;
@@ -33,47 +43,26 @@ function serializeHome(home, canSeeAddress) {
   }
   return plain;
 }
-// POST /api/homes/:id/claim/request
-// Only unclaimed homes (ownerId === null) can be claimed — this is how a
-// homeowner takes ownership of a listing that came from an approved
-// nomination rather than one they created themselves.
-async function requestHomeClaim(req, res, next) {
+
+// POST /api/homes/:id/claim/generate  (admin only)
+async function generateHomeClaimCode(req, res, next) {
   try {
     const home = await Home.findByPk(req.params.id);
     if (!home) return res.status(404).json({ success: false, error: "Home not found" });
-
     if (home.ownerId) {
       return res.status(400).json({ success: false, error: "This home has already been claimed" });
     }
 
     const code = generateClaimCode();
+    const expiresAt = new Date(Date.now() + CLAIM_CODE_TTL_MS);
     await home.update({
       claimCodeHash: hashClaimCode(code),
-      claimCodeExpiresAt: new Date(Date.now() + CLAIM_CODE_TTL_MS),
-      claimRequestedBy: req.user.id,
+      claimCodeExpiresAt: expiresAt,
+      claimRequestedBy: null,
+      claimAttempts: 0,
     });
 
-    // Best-effort delivery on whatever contact info this account has —
-    // matches the proposal's "automated message" fallback. Physical mail
-    // to the property address itself is out of scope without a mail-API
-    // integration (e.g. Lob) and isn't attempted here.
-    sendEmail({
-      to: req.user.email,
-      subject: "Your Home Holiday Hunt claim code",
-      text: `Hi ${req.user.name}, your verification code to claim ${home.address} is: ${code}\n\nEnter this code in your dashboard within 7 days to complete your claim. If you didn't request this, you can ignore this email.`,
-    }).catch(() => { });
-
-    if (req.user.phone) {
-      sendSms(
-        req.user.phone,
-        `Home Holiday Hunt: your claim code for ${home.address} is ${code}. It expires in 7 days.`
-      ).catch(() => { });
-    }
-
-    res.json({
-      success: true,
-      message: "A verification code has been sent. Enter it below to complete your claim.",
-    });
+    res.json({ success: true, code, expiresAt });
   } catch (error) {
     next(error);
   }
@@ -91,17 +80,15 @@ async function verifyHomeClaim(req, res, next) {
     if (home.ownerId) {
       return res.status(400).json({ success: false, error: "This home has already been claimed" });
     }
-    if (home.claimRequestedBy !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        error: "No pending claim request for this home under your account. Request a code first.",
-      });
-    }
     if (!home.claimCodeHash || !home.claimCodeExpiresAt || home.claimCodeExpiresAt < new Date()) {
-      return res.status(400).json({ success: false, error: "This code has expired. Please request a new one." });
+      return res.status(400).json({ success: false, error: "No valid code for this home. Contact support." });
     }
-    if (hashClaimCode(code) !== home.claimCodeHash) {
-      return res.status(400).json({ success: false, error: "Incorrect code. Please try again." });
+    if (home.claimAttempts >= MAX_CLAIM_ATTEMPTS) {
+      return res.status(429).json({ success: false, error: "Too many wrong attempts. Contact support for a new code." });
+    }
+    if (hashClaimCode(String(code).trim().toUpperCase()) !== home.claimCodeHash) {
+      await home.increment("claimAttempts");
+      return res.status(400).json({ success: false, error: "Incorrect code." });
     }
 
     await home.update({
@@ -109,13 +96,15 @@ async function verifyHomeClaim(req, res, next) {
       claimCodeHash: null,
       claimCodeExpiresAt: null,
       claimRequestedBy: null,
+      claimAttempts: 0,
     });
 
-    res.json({ success: true, home });
+    res.json({ success: true, home: serializeHome(home, true) });
   } catch (error) {
     next(error);
   }
 }
+
 async function listHomes(req, res, next) {
   try {
     const { city, eventId, address, unclaimed } = req.query;
@@ -147,7 +136,7 @@ async function getHomeBySlug(req, res, next) {
   try {
     const home = await Home.findOne({ where: { slug: req.params.slug } });
     if (!home) return res.status(404).json({ success: false, error: "Home not found" });
-    res.json({ success: true, home });
+    res.json({ success: true, home: stripClaimFields(home.toJSON()) });
   } catch (error) {
     next(error);
   }
@@ -159,7 +148,7 @@ async function getMyHomes(req, res, next) {
       where: { ownerId: req.user.id },
       order: [["createdAt", "DESC"]],
     });
-    res.json({ success: true, homes });
+    res.json({ success: true, homes: homes.map((h) => stripClaimFields(h.toJSON())) });
   } catch (error) {
     next(error);
   }
@@ -178,16 +167,13 @@ async function createHome(req, res, next) {
       slug: makeSlug(address, city),
     });
 
-    res.status(201).json({ success: true, home });
+    res.status(201).json({ success: true, home: stripClaimFields(home.toJSON()) });
   } catch (error) {
     next(error);
   }
 }
 
 // Homeowner (or admin): PATCH /api/homes/:id
-// Lets a homeowner edit the details on their own listing — visiting hours,
-// a thank-you note for guests, and an optional charity link. Admins can
-// edit any home; homeowners can only edit homes they own.
 async function updateHome(req, res, next) {
   try {
     const home = await Home.findByPk(req.params.id);
@@ -226,13 +212,19 @@ async function updateHome(req, res, next) {
       ...(charityLink !== undefined ? { charityLink } : {}),
     });
 
-    res.json({ success: true, home });
+    res.json({ success: true, home: stripClaimFields(home.toJSON()) });
   } catch (error) {
     next(error);
   }
 }
 
 module.exports = {
-  listHomes, getHome, getHomeBySlug, getMyHomes, createHome, updateHome, requestHomeClaim,
+  listHomes,
+  getHome,
+  getHomeBySlug,
+  getMyHomes,
+  createHome,
+  updateHome,
+  generateHomeClaimCode,
   verifyHomeClaim,
 };

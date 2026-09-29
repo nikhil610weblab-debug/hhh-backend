@@ -50,6 +50,7 @@ module.exports = (sequelize, DataTypes) => {
       claimCodeHash: { type: DataTypes.STRING(64), allowNull: true, field: "claim_code_hash" },
       claimCodeExpiresAt: { type: DataTypes.DATE, allowNull: true, field: "claim_code_expires_at" },
       claimRequestedBy: { type: DataTypes.UUID, allowNull: true, field: "claim_requested_by" },
+      claimAttempts: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: "claim_attempts" },
     },
     {
       sequelize,
